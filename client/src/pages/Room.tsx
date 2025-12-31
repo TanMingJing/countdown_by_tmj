@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import { differenceInSeconds, intervalToDuration, addSeconds } from 'date-fns';
@@ -77,28 +77,75 @@ const Room: React.FC = () => {
       console.error('Audio play failed', e);
     }
   };
+  // 倒计时逻辑 — use a Web Worker to avoid main-thread timer throttling when tab is backgrounded
+  const countdownWorkerRef = useRef<Worker | null>(null);
 
-  // 倒计时逻辑
   useEffect(() => {
     if (!roomData?.targetDate) return;
 
-    const timer = setInterval(() => {
-      const now = new Date();
-      const target = new Date(roomData.targetDate);
-      const diff = differenceInSeconds(target, now);
+    // request notification permission proactively (best-effort)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { void Notification.requestPermission(); } catch (err) { console.warn(err); }
+    }
 
-      if (diff <= 0) {
-        setIsExpired(true);
-        setTimeLeft(null);
-        clearInterval(timer);
-      } else {
-        setIsExpired(false);
-        setTimeLeft(intervalToDuration({ start: now, end: target }));
+    // try to create a module worker (Vite supports new URL(..., import.meta.url))
+    try {
+      // terminate previous if any
+      if (countdownWorkerRef.current) {
+        countdownWorkerRef.current.terminate();
+        countdownWorkerRef.current = null;
       }
-    }, 1000);
 
-    return () => clearInterval(timer);
-  }, [roomData]);
+      const worker = new Worker(new URL('../workers/countdownWorker.ts', import.meta.url), { type: 'module' });
+      countdownWorkerRef.current = worker;
+
+      worker.postMessage({ targetDate: roomData.targetDate });
+
+      worker.onmessage = (ev: MessageEvent) => {
+        const msg = ev.data || {};
+        if (msg.type === 'tick') {
+          // compute fresh duration from actual target date to avoid drift
+          setIsExpired(false);
+          setTimeLeft(intervalToDuration({ start: new Date(), end: new Date(roomData.targetDate) }));
+        } else if (msg.type === 'expired') {
+          setIsExpired(true);
+          setTimeLeft(null);
+          // notify + sound
+          try {
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('倒计时结束', { body: roomData.title });
+            }
+          } catch { /* ignore */ }
+          playNotificationSound();
+        }
+      };
+    } catch {
+      // fallback to main-thread interval if worker unavailable
+      const timer = setInterval(() => {
+        const now = new Date();
+        const target = new Date(roomData.targetDate);
+        const diff = differenceInSeconds(target, now);
+
+        if (diff <= 0) {
+          setIsExpired(true);
+          setTimeLeft(null);
+          clearInterval(timer);
+        } else {
+          setIsExpired(false);
+          setTimeLeft(intervalToDuration({ start: now, end: target }));
+        }
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+
+    return () => {
+      if (countdownWorkerRef.current) {
+        countdownWorkerRef.current.terminate();
+        countdownWorkerRef.current = null;
+      }
+    };
+  }, [roomData?.targetDate, roomData?.title]);
 
   // Socket 连接逻辑
   useEffect(() => {
