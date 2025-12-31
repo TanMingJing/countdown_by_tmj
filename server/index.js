@@ -4,6 +4,24 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
+app.use(express.json());
+
+// Web Push support
+let webpush;
+try {
+  webpush = require('web-push');
+  const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
+  const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
+  const VAPID_EMAIL = process.env.VAPID_EMAIL || 'mailto:admin@example.com';
+  if (VAPID_PUBLIC && VAPID_PRIVATE) {
+    webpush.setVapidDetails(VAPID_EMAIL, VAPID_PUBLIC, VAPID_PRIVATE);
+  } else {
+    console.log('VAPID keys not set; push notifications disabled.');
+  }
+} catch (err) {
+  console.warn('web-push not available:', err && err.message);
+  webpush = null;
+}
 
 // Allow configuring allowed client origin via environment variable for production
 // (set CLIENT_ORIGIN to your client URL, e.g. https://your-client.vercel.app)
@@ -22,6 +40,20 @@ const io = new Server(server, {
 // rooms: { [roomId]: { title, targetDate, createdAt, participants: number, users: [{id, username}] } }
 const rooms = {};
 
+// helper to schedule push for a subscription at room target time
+function schedulePushForRoom(roomId, subscription, targetDate) {
+  if (!webpush) return;
+  const sendAt = new Date(targetDate).getTime();
+  const delay = Math.max(0, sendAt - Date.now());
+
+  setTimeout(() => {
+    const payload = JSON.stringify({ title: `倒计时结束`, body: rooms[roomId]?.title || 'Event ended' });
+    webpush.sendNotification(subscription, payload).catch(err => {
+      console.error('Failed to send push', err);
+    });
+  }, delay);
+}
+
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -34,9 +66,26 @@ io.on('connection', (socket) => {
       createdAt: new Date(),
       participants: 0,
       users: []
+      ,subscriptions: []
     };
     socket.emit('room_created', roomId);
   });
+
+// Endpoint to register a push subscription for a room
+app.post('/api/subscribe', (req, res) => {
+  const { subscription, roomId, targetDate } = req.body || {};
+  if (!subscription || !roomId) return res.status(400).json({ error: 'subscription and roomId required' });
+  if (!rooms[roomId]) {
+    rooms[roomId] = { title: 'Unknown', targetDate: targetDate || new Date().toISOString(), createdAt: new Date(), participants: 0, users: [], subscriptions: [] };
+  }
+  rooms[roomId].subscriptions = rooms[roomId].subscriptions || [];
+  rooms[roomId].subscriptions.push(subscription);
+
+  // schedule push at targetDate
+  schedulePushForRoom(roomId, subscription, targetDate || rooms[roomId].targetDate);
+
+  return res.json({ ok: true });
+});
 
   // 加入房间
   socket.on('join_room', (data) => {

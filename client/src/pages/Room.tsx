@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import { differenceInSeconds, intervalToDuration, addSeconds } from 'date-fns';
@@ -148,6 +148,44 @@ const Room: React.FC = () => {
   }, [roomData?.targetDate, roomData?.title]);
 
   // Socket 连接逻辑
+  // Push subscription helper (defined before socket handlers)
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  };
+
+  const tryRegisterPush = useCallback(async (rid: string, targetDate?: string) => {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      const publicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!publicKey) return;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+
+      const serverUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3001';
+      await fetch(`${serverUrl}/api/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub, roomId: rid, targetDate })
+      });
+    } catch (err) {
+      console.warn('Push registration failed', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (!roomId) return;
     
@@ -162,6 +200,8 @@ const Room: React.FC = () => {
       setRoomData(data);
       setParticipants(data.participants);
       if (data.users) setUsers(data.users);
+      // Try to register push subscription for background notifications
+      tryRegisterPush(data.roomId || roomId, data.targetDate);
     });
 
     socket.on('participants_update', (count) => {
@@ -217,6 +257,8 @@ const Room: React.FC = () => {
       socket.off('users_update');
     };
   }, [roomId, navigate, username, isChatOpen]); // Added username and isChatOpen to deps
+
+  
 
   // handle chat toggle and clear unread when opened
   const toggleChat = () => {
