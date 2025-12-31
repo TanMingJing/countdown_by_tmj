@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import { ArrowRight, Briefcase, PartyPopper, Coffee } from 'lucide-react';
@@ -6,15 +6,15 @@ import { format, addHours, setHours, setMinutes, setSeconds, addDays, nextFriday
 
 const Home: React.FC = () => {
   const [title, setTitle] = useState('');
-  const [targetDate, setTargetDate] = useState('');
-  const navigate = useNavigate();
-
-  // 初始化默认时间：当前时间往后推1小时的整点
-  useEffect(() => {
+  const [targetDate, setTargetDate] = useState<string>(() => {
+    // initialize default time to next hour's top-of-hour without causing a synchronous setState in an effect
     const now = new Date();
     const defaultTime = setSeconds(setMinutes(setHours(addHours(now, 1), now.getHours() + 1), 0), 0);
-    setTargetDate(format(defaultTime, "yyyy-MM-dd'T'HH:mm"));
-  }, []);
+    return format(defaultTime, "yyyy-MM-dd'T'HH:mm");
+  });
+  const navigate = useNavigate();
+
+  // default targetDate is initialized above to avoid setState inside effect
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
