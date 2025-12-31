@@ -11,7 +11,6 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
   const [isInVoice, setIsInVoice] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
-  const [peers, setPeers] = useState<SimplePeer.Instance[]>([]);
   const userStream = useRef<MediaStream | null>(null);
   const peersRef = useRef<{ peerID: string; peer: SimplePeer.Instance }[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
@@ -38,7 +37,6 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
             peerID: userId,
             peer,
           });
-          setPeers((prev) => [...prev, peer]);
         });
 
         socket.on('user_left_voice', (userId: string) => {
@@ -68,7 +66,6 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
                 peerID: payload.senderId,
                 peer,
              })
-             setPeers((prev) => [...prev, peer]);
           }
         });
       })
@@ -128,9 +125,8 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
     socket.off('signal');
     socket.off('user_left_voice');
 
-    peersRef.current.forEach(({ peer }) => peer.destroy());
-    peersRef.current = [];
-    setPeers([]);
+      peersRef.current.forEach(({ peer }) => peer.destroy());    
+      peersRef.current = [];    
     setRemoteStreams({});
     setIsInVoice(false);
   };
