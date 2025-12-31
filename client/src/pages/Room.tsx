@@ -251,8 +251,13 @@ const Room: React.FC = () => {
 
           <div className="flex items-center gap-1 bg-slate-700/50 px-3 py-1 rounded-full text-sm">
             <Users size={16} className="text-green-400" />
-            <button onClick={() => setShowUsersList(s => !s)} className="flex items-center gap-2">
-              <span>{participants}</span>
+            <span className="mr-2">{participants}</span>
+            <button
+              onClick={() => setShowUsersList(true)}
+              className="text-slate-200 hover:text-white px-2 py-1 rounded hover:bg-slate-700/60"
+              title="显示全部成员"
+            >
+              成员
             </button>
           </div>
           <button 
@@ -379,16 +384,28 @@ const Room: React.FC = () => {
 
       {/* Users list dropdown */}
       {showUsersList && (
-        <div className="fixed top-16 right-28 z-50 bg-slate-800 border border-slate-700 rounded-lg p-3 w-56">
-          <h4 className="text-sm text-slate-300 font-semibold mb-2">房间成员 ({users.length})</h4>
-          <ul className="space-y-2 max-h-64 overflow-auto">
-            {users.map(u => (
-              <li key={u.id} className={`flex items-center justify-between text-sm ${u.username === username ? 'text-blue-300 font-bold' : 'text-slate-200'}`}>
-                <span className="truncate">{u.username}</span>
-                {u.id === socket.id && <span className="text-xs text-slate-400">(您)</span>}
-              </li>
-            ))}
-          </ul>
+        // Modal showing full list of users
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-6">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowUsersList(false)} />
+          <div className="relative bg-slate-800 border border-slate-700 rounded-lg p-6 w-full max-w-md shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">房间成员 ({users.length})</h3>
+              <button onClick={() => setShowUsersList(false)} className="text-slate-400 hover:text-white">关闭</button>
+            </div>
+            <ul className="space-y-3 max-h-72 overflow-auto">
+              {users.map(u => (
+                <li key={u.id} className={`flex items-center justify-between text-sm ${u.username === username ? 'text-blue-300 font-bold' : 'text-slate-200'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-xs text-slate-300">
+                      {u.username.slice(0,1).toUpperCase()}
+                    </div>
+                    <span className="truncate">{u.username}</span>
+                  </div>
+                  {u.id === socket.id && <span className="text-xs text-slate-400">(您)</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
 
