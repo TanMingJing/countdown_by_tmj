@@ -8,6 +8,16 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 
+// Register service worker early so push notifications can be received when app is backgrounded.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    // registration successful
+    console.log('ServiceWorker registered', reg.scope);
+  }).catch(err => {
+    console.warn('ServiceWorker registration failed', err);
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

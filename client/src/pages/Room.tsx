@@ -79,6 +79,87 @@ const Room: React.FC = () => {
   };
   // 倒计时逻辑 — use a Web Worker to avoid main-thread timer throttling when tab is backgrounded
   const countdownWorkerRef = useRef<Worker | null>(null);
+  type WakeLockSentinel = { release: () => Promise<void>; addEventListener?: (ev: string, fn: () => void) => void };
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscRef = useRef<OscillatorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+
+  const keepAwake = useCallback(async () => {
+    try {
+      // Try the Wake Lock API first
+      if ('wakeLock' in navigator) {
+        try {
+          // @ts-expect-error - Wake Lock may be an experimental API on navigator
+          const navWithWake = navigator as unknown as { wakeLock?: { request?: (type: 'screen') => Promise<WakeLockSentinel> } };
+          const sentinel = navWithWake.wakeLock && navWithWake.wakeLock.request ? await navWithWake.wakeLock.request('screen') : null;
+          if (sentinel) {
+            wakeLockRef.current = sentinel;
+            if (typeof sentinel.addEventListener === 'function') {
+              sentinel.addEventListener('release', () => { wakeLockRef.current = null; });
+            }
+            return;
+          }
+        } catch (e) {
+          // fallthrough to audio fallback
+          console.warn('Wake Lock request failed, falling back to audio hack', e);
+        }
+      }
+
+      // Audio fallback: create a tiny inaudible oscillator to keep the audio thread alive
+      type Win = Window & { AudioContext?: typeof globalThis.AudioContext; webkitAudioContext?: typeof globalThis.AudioContext };
+      const AudioCtor = (window as Win).AudioContext || (window as Win).webkitAudioContext;
+      if (!AudioCtor) return;
+
+      if (!audioCtxRef.current) {
+        const ctx = new AudioCtor();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        // very low volume
+        gain.gain.value = 0.00001;
+        osc.type = 'sine';
+        osc.frequency.value = 440;
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        // start quietly
+        osc.start();
+
+        audioCtxRef.current = ctx;
+        oscRef.current = osc;
+        gainRef.current = gain;
+      }
+    } catch (err) {
+      console.warn('keepAwake failed', err);
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    try {
+      if (wakeLockRef.current && typeof wakeLockRef.current.release === 'function') {
+        try { await wakeLockRef.current.release(); } catch { /* ignore */ }
+        wakeLockRef.current = null;
+      }
+
+      if (oscRef.current) {
+        try { oscRef.current.stop(); } catch { /* ignore */ }
+        oscRef.current.disconnect();
+        oscRef.current = null;
+      }
+      if (gainRef.current) {
+        try { gainRef.current.disconnect(); } catch { /* ignore */ }
+        gainRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        try { await audioCtxRef.current.close(); } catch { /* ignore */ }
+        audioCtxRef.current = null;
+      }
+    } catch (err) {
+      console.warn('releaseWakeLock failed', err);
+    }
+  }, []);
 
   useEffect(() => {
     if (!roomData?.targetDate) return;
@@ -89,6 +170,7 @@ const Room: React.FC = () => {
     }
 
     // try to create a module worker (Vite supports new URL(..., import.meta.url))
+    let onVis: (() => void) | undefined;
     try {
       // terminate previous if any
       if (countdownWorkerRef.current) {
@@ -119,6 +201,13 @@ const Room: React.FC = () => {
           playNotificationSound();
         }
       };
+      // when the page becomes visible again, resync worker with target date
+      onVis = () => {
+        if (document.visibilityState === 'visible' && countdownWorkerRef.current) {
+          try { countdownWorkerRef.current.postMessage({ targetDate: roomData.targetDate }); } catch { /* ignore */ }
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
     } catch {
       // fallback to main-thread interval if worker unavailable
       const timer = setInterval(() => {
@@ -140,12 +229,25 @@ const Room: React.FC = () => {
     }
 
     return () => {
+      if (onVis) document.removeEventListener('visibilitychange', onVis);
       if (countdownWorkerRef.current) {
         countdownWorkerRef.current.terminate();
         countdownWorkerRef.current = null;
       }
     };
   }, [roomData?.targetDate, roomData?.title]);
+
+  // Try to keep the device awake while countdown is running. This uses the Wake Lock API when available
+  // and falls back to a very-low-volume oscillator (audio) hack to keep activity in some browsers.
+  useEffect(() => {
+    if (roomData?.targetDate && !isExpired) {
+      void keepAwake();
+    } else {
+      void releaseWakeLock();
+    }
+
+    return () => { void releaseWakeLock(); };
+  }, [roomData?.targetDate, isExpired, keepAwake, releaseWakeLock]);
 
   // Socket 连接逻辑
   // Push subscription helper (defined before socket handlers)
@@ -256,7 +358,7 @@ const Room: React.FC = () => {
       socket.off('receive_interaction');
       socket.off('users_update');
     };
-  }, [roomId, navigate, username, isChatOpen]); // Added username and isChatOpen to deps
+  }, [roomId, navigate, username, isChatOpen, tryRegisterPush]); // Added username and isChatOpen to deps
 
   
 
