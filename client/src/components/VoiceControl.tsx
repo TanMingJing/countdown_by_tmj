@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import SimplePeer from 'simple-peer';
 import { socket } from '../socket';
 import { Mic, MicOff, Phone, PhoneOff, Headphones, VolumeX } from 'lucide-react';
@@ -15,12 +15,29 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
   const peersRef = useRef<{ peerID: string; peer: SimplePeer.Instance }[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
 
+  const leaveVoice = useCallback(() => {
+    if (userStream.current) {
+      userStream.current.getTracks().forEach(track => track.stop());
+      userStream.current = null;
+    }
+
+    socket.emit('leave_voice', roomId);
+    socket.off('user_joined_voice');
+    socket.off('signal');
+    socket.off('user_left_voice');
+
+    peersRef.current.forEach(({ peer }) => peer.destroy());
+    peersRef.current = [];
+    setRemoteStreams({});
+    setIsInVoice(false);
+  }, [roomId]);
+
   useEffect(() => {
     // Clean up on unmount
     return () => {
       leaveVoice();
     };
-  }, []);
+  }, [leaveVoice]);
 
   const joinVoice = () => {
     navigator.mediaDevices.getUserMedia({ video: false, audio: true })
@@ -46,7 +63,6 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
             }
             const newPeers = peersRef.current.filter(p => p.peerID !== userId);
             peersRef.current = newPeers;
-            setPeers(newPeers.map(p => p.peer));
           // Remove remote stream for that user
           setRemoteStreams(prev => {
             const copy = { ...prev };
@@ -112,23 +128,6 @@ export const VoiceControl: React.FC<VoiceControlProps> = ({ roomId }) => {
     peer.signal(incomingSignal);
 
     return peer;
-  };
-
-  const leaveVoice = () => {
-    if (userStream.current) {
-      userStream.current.getTracks().forEach(track => track.stop());
-      userStream.current = null;
-    }
-
-    socket.emit('leave_voice', roomId);
-    socket.off('user_joined_voice');
-    socket.off('signal');
-    socket.off('user_left_voice');
-
-      peersRef.current.forEach(({ peer }) => peer.destroy());    
-      peersRef.current = [];    
-    setRemoteStreams({});
-    setIsInVoice(false);
   };
 
   const toggleMute = () => {

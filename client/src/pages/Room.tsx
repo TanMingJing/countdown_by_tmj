@@ -39,8 +39,8 @@ const Room: React.FC = () => {
   const [copySuccess, setCopySuccess] = useState(false);
   const [showUsersList, setShowUsersList] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [username, setUsername] = useState('');
-  const [showNameModal, setShowNameModal] = useState(true);
+  const [username, setUsername] = useState<string>(() => localStorage.getItem('username') || '');
+  const [showNameModal, setShowNameModal] = useState<boolean>(() => !(localStorage.getItem('username')));
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Debug function to set countdown to 5 seconds
@@ -54,21 +54,23 @@ const Room: React.FC = () => {
 
   const playNotificationSound = () => {
     try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      
-      const ctx = new AudioContext();
+      // Avoid using `any` to satisfy lint rules — declare extended Window type when needed
+      type Win = Window & { AudioContext?: typeof globalThis.AudioContext; webkitAudioContext?: typeof globalThis.AudioContext };
+      const AudioCtxCtor = (window as Win).AudioContext || (window as Win).webkitAudioContext;
+      if (!AudioCtxCtor) return;
+
+      const ctx = new AudioCtxCtor();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.type = 'sine';
       osc.frequency.setValueAtTime(500, ctx.currentTime);
       gain.gain.setValueAtTime(0.1, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
+
       osc.start();
       osc.stop(ctx.currentTime + 0.2);
     } catch (e) {
@@ -104,7 +106,6 @@ const Room: React.FC = () => {
     
     // 如果没有用户名，不连接 socket，等待用户输入
     if (!username) {
-      setShowNameModal(true);
       return;
     }
 
@@ -124,7 +125,8 @@ const Room: React.FC = () => {
       setUsers(list);
     });
 
-    const handleReceiveMessage = (msg: any) => {
+    interface ChatMessage { senderId: string; username?: string; text?: string; id?: string; timestamp?: string }
+    const handleReceiveMessage = (msg: ChatMessage) => {
       // 如果消息不是自己发的
       if (msg.senderId !== socket.id) {
         playNotificationSound();
@@ -141,7 +143,7 @@ const Room: React.FC = () => {
       navigate('/');
     });
 
-    socket.on('receive_interaction', (data) => {
+    socket.on('receive_interaction', (data: { type: 'emoji' | 'message'; content: string; senderId: string }) => {
       const id = Math.random().toString(36).substring(7);
       const newInteraction = {
         ...data,
@@ -169,12 +171,14 @@ const Room: React.FC = () => {
     };
   }, [roomId, navigate, username, isChatOpen]); // Added username and isChatOpen to deps
 
-  // Clear unread count when chat is opened
-  useEffect(() => {
-    if (isChatOpen) {
-      setUnreadCount(0);
-    }
-  }, [isChatOpen]);
+  // handle chat toggle and clear unread when opened
+  const toggleChat = () => {
+    setIsChatOpen(prev => {
+      const next = !prev;
+      if (next) setUnreadCount(0);
+      return next;
+    });
+  };
 
   const sendInteraction = (content: string) => {
     socket.emit('send_interaction', {
@@ -198,9 +202,10 @@ const Room: React.FC = () => {
           <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700 shadow-2xl">
             <h2 className="text-2xl font-bold text-white mb-4">欢迎加入倒计时</h2>
             <p className="text-slate-400 mb-6">请输入您的昵称以便大家认识您</p>
-            <form onSubmit={(e) => {
+            <form onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
               e.preventDefault();
-              const input = (e.target as any).username.value;
+              const form = new FormData(e.currentTarget);
+              const input = (form.get('username') || '').toString();
               if (input.trim()) {
                 localStorage.setItem('username', input);
                 setUsername(input);
@@ -267,7 +272,7 @@ const Room: React.FC = () => {
             {copySuccess ? '已复制!' : <><Share2 size={16} /> 邀请</>}
           </button>
            <button 
-            onClick={() => setIsChatOpen(!isChatOpen)}
+            onClick={toggleChat}
             className={`relative p-2 rounded-full transition-colors ${isChatOpen ? 'bg-blue-600 text-white' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-600'}`}
           >
             <MessageCircle size={20} />
