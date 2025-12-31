@@ -112,7 +112,7 @@ const Room: React.FC = () => {
       setParticipants(count);
     });
 
-    socket.on('receive_message', (msg) => {
+    const handleReceiveMessage = (msg: any) => {
       // 如果消息不是自己发的
       if (msg.senderId !== socket.id) {
         playNotificationSound();
@@ -120,7 +120,9 @@ const Room: React.FC = () => {
           setUnreadCount(prev => prev + 1);
         }
       }
-    });
+    };
+
+    socket.on('receive_message', handleReceiveMessage);
 
     socket.on('error', (msg) => {
       alert(msg);
@@ -148,7 +150,7 @@ const Room: React.FC = () => {
       socket.emit('leave_room', roomId);
       socket.off('room_data');
       socket.off('participants_update');
-      socket.off('receive_message'); // Clean up listener
+      socket.off('receive_message', handleReceiveMessage); // Only remove this specific listener
       socket.off('error');
       socket.off('receive_interaction');
     };

@@ -4,7 +4,11 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
-app.use(cors());
+
+// Allow configuring allowed client origin via environment variable for production
+// (set CLIENT_ORIGIN to your client URL, e.g. https://your-client.vercel.app)
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*';
+app.use(cors({ origin: CLIENT_ORIGIN }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -120,4 +124,9 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// Basic health route for platform health checks
+app.get('/', (req, res) => {
+  res.send('OK');
 });
