@@ -8,6 +8,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Ensure Node-like globals exist before any module executes (important for some libs after bundling) -->
+    <script>
+      window.global = window.global || window;
+      window.process = window.process || { env: { NODE_ENV: 'production' } };
+      // Optionally polyfill Buffer if needed by dependencies
+      // window.Buffer = window.Buffer || (function(){ try { return window.require && window.require('buffer').Buffer } catch(e) { return undefined } })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
