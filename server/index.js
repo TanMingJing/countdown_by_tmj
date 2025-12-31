@@ -19,7 +19,7 @@ const io = new Server(server, {
 });
 
 // 简单的内存存储
-// rooms: { [roomId]: { title, targetDate, createdAt, participants: number } }
+// rooms: { [roomId]: { title, targetDate, createdAt, participants: number, users: [{id, username}] } }
 const rooms = {};
 
 io.on('connection', (socket) => {
@@ -32,7 +32,8 @@ io.on('connection', (socket) => {
       title,
       targetDate,
       createdAt: new Date(),
-      participants: 0
+      participants: 0,
+      users: []
     };
     socket.emit('room_created', roomId);
   });
@@ -49,12 +50,18 @@ io.on('connection', (socket) => {
       // 存储用户信息
       socket.data.username = username;
 
+      // Add to users list if not present
+      const existing = rooms[roomId].users.find(u => u.id === socket.id);
+      if (!existing) {
+        rooms[roomId].users.push({ id: socket.id, username });
+      }
+
       // 发送当前房间信息给新加入的用户
       socket.emit('room_data', rooms[roomId]);
-      
-      // 通知房间内所有人人数更新
+      // Broadcast updated users list and participant count
+      io.to(roomId).emit('users_update', rooms[roomId].users);
       io.to(roomId).emit('participants_update', rooms[roomId].participants);
-      
+
       console.log(`User ${username} (${socket.id}) joined room ${roomId}`);
     } else {
       socket.emit('error', 'Room not found');
@@ -64,9 +71,12 @@ io.on('connection', (socket) => {
   // 离开房间
   socket.on('leave_room', (roomId) => {
       if (rooms[roomId]) {
-          socket.leave(roomId);
-          rooms[roomId].participants = Math.max(0, rooms[roomId].participants - 1);
-          io.to(roomId).emit('participants_update', rooms[roomId].participants);
+        socket.leave(roomId);
+        rooms[roomId].participants = Math.max(0, rooms[roomId].participants - 1);
+        // remove user from users list
+        rooms[roomId].users = rooms[roomId].users.filter(u => u.id !== socket.id);
+        io.to(roomId).emit('participants_update', rooms[roomId].participants);
+        io.to(roomId).emit('users_update', rooms[roomId].users);
       }
   });
   
@@ -110,8 +120,11 @@ io.on('connection', (socket) => {
       const roomsJoined = Array.from(socket.rooms);
       roomsJoined.forEach(roomId => {
           if (rooms[roomId]) {
-              rooms[roomId].participants = Math.max(0, rooms[roomId].participants - 1);
-              io.to(roomId).emit('participants_update', rooms[roomId].participants);
+          rooms[roomId].participants = Math.max(0, rooms[roomId].participants - 1);
+          // remove user from users list
+          rooms[roomId].users = rooms[roomId].users.filter(u => u.id !== socket.id);
+          io.to(roomId).emit('participants_update', rooms[roomId].participants);
+          io.to(roomId).emit('users_update', rooms[roomId].users);
           }
       });
   });

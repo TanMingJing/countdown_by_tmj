@@ -13,6 +13,11 @@ interface RoomData {
   participants: number;
 }
 
+interface RoomUser {
+  id: string;
+  username: string;
+}
+
 interface Interaction {
   id: string;
   type: 'emoji' | 'message';
@@ -30,7 +35,9 @@ const Room: React.FC = () => {
   const [isExpired, setIsExpired] = useState(false);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [participants, setParticipants] = useState(1);
+  const [users, setUsers] = useState<RoomUser[]>([]);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [showUsersList, setShowUsersList] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [showNameModal, setShowNameModal] = useState(true);
@@ -106,10 +113,15 @@ const Room: React.FC = () => {
     socket.on('room_data', (data) => {
       setRoomData(data);
       setParticipants(data.participants);
+      if (data.users) setUsers(data.users);
     });
 
     socket.on('participants_update', (count) => {
       setParticipants(count);
+    });
+
+    socket.on('users_update', (list: RoomUser[]) => {
+      setUsers(list);
     });
 
     const handleReceiveMessage = (msg: any) => {
@@ -153,6 +165,7 @@ const Room: React.FC = () => {
       socket.off('receive_message', handleReceiveMessage); // Only remove this specific listener
       socket.off('error');
       socket.off('receive_interaction');
+      socket.off('users_update');
     };
   }, [roomId, navigate, username, isChatOpen]); // Added username and isChatOpen to deps
 
@@ -238,7 +251,9 @@ const Room: React.FC = () => {
 
           <div className="flex items-center gap-1 bg-slate-700/50 px-3 py-1 rounded-full text-sm">
             <Users size={16} className="text-green-400" />
-            <span>{participants}</span>
+            <button onClick={() => setShowUsersList(s => !s)} className="flex items-center gap-2">
+              <span>{participants}</span>
+            </button>
           </div>
           <button 
             onClick={copyLink}
@@ -361,6 +376,21 @@ const Room: React.FC = () => {
           {interaction.content}
         </div>
       ))}
+
+      {/* Users list dropdown */}
+      {showUsersList && (
+        <div className="fixed top-16 right-28 z-50 bg-slate-800 border border-slate-700 rounded-lg p-3 w-56">
+          <h4 className="text-sm text-slate-300 font-semibold mb-2">房间成员 ({users.length})</h4>
+          <ul className="space-y-2 max-h-64 overflow-auto">
+            {users.map(u => (
+              <li key={u.id} className={`flex items-center justify-between text-sm ${u.username === username ? 'text-blue-300 font-bold' : 'text-slate-200'}`}>
+                <span className="truncate">{u.username}</span>
+                {u.id === socket.id && <span className="text-xs text-slate-400">(您)</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <style>{`
         @keyframes floatUp {
