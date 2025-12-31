@@ -34,18 +34,24 @@ io.on('connection', (socket) => {
   });
 
   // 加入房间
-  socket.on('join_room', (roomId) => {
+  socket.on('join_room', (data) => {
+    const roomId = typeof data === 'object' ? data.roomId : data;
+    const username = typeof data === 'object' ? data.username : 'Anonymous';
+
     if (rooms[roomId]) {
       socket.join(roomId);
       rooms[roomId].participants += 1;
       
+      // 存储用户信息
+      socket.data.username = username;
+
       // 发送当前房间信息给新加入的用户
       socket.emit('room_data', rooms[roomId]);
       
       // 通知房间内所有人人数更新
       io.to(roomId).emit('participants_update', rooms[roomId].participants);
       
-      console.log(`User ${socket.id} joined room ${roomId}`);
+      console.log(`User ${username} (${socket.id}) joined room ${roomId}`);
     } else {
       socket.emit('error', 'Room not found');
     }
@@ -72,6 +78,7 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('receive_message', {
       id: Date.now().toString() + Math.random().toString(),
       senderId: socket.id,
+      username: socket.data.username || 'Anonymous',
       text: message,
       timestamp: new Date()
     });

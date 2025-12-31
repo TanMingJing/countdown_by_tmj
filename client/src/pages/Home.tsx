@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
-import { ArrowRight, Briefcase, PartyPopper, Coffee, Sun } from 'lucide-react';
+import { ArrowRight, Briefcase, PartyPopper, Coffee } from 'lucide-react';
 import { format, addHours, setHours, setMinutes, setSeconds, addDays, nextFriday } from 'date-fns';
 
 const Home: React.FC = () => {

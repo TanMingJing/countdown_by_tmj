@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
-import { differenceInSeconds, intervalToDuration } from 'date-fns';
-import { Users, Share2, Heart, PartyPopper, Clock, MessageCircle } from 'lucide-react';
+import { differenceInSeconds, intervalToDuration, addSeconds } from 'date-fns';
+import { Users, Share2, Clock, MessageCircle, Bug } from 'lucide-react';
+import { ChatPanel } from '../components/ChatPanel';
+import { VoiceControl } from '../components/VoiceControl';
 import clsx from 'clsx';
 
 interface RoomData {
@@ -24,11 +26,48 @@ const Room: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const [roomData, setRoomData] = useState<RoomData | null>(null);
-  const [timeLeft, setTimeLeft] = useState<Duration | null>(null);
+  const [timeLeft, setTimeLeft] = useState<ReturnType<typeof intervalToDuration> | null>(null);
   const [isExpired, setIsExpired] = useState(false);
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [participants, setParticipants] = useState(1);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [username, setUsername] = useState('');
+  const [showNameModal, setShowNameModal] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Debug function to set countdown to 5 seconds
+  const debugSetAlmostDone = () => {
+    if (roomData) {
+      const newTarget = addSeconds(new Date(), 5).toISOString();
+      setRoomData({ ...roomData, targetDate: newTarget });
+      setIsExpired(false);
+    }
+  };
+
+  const playNotificationSound = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(500, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (e) {
+      console.error('Audio play failed', e);
+    }
+  };
 
   // 倒计时逻辑
   useEffect(() => {
@@ -55,8 +94,14 @@ const Room: React.FC = () => {
   // Socket 连接逻辑
   useEffect(() => {
     if (!roomId) return;
+    
+    // 如果没有用户名，不连接 socket，等待用户输入
+    if (!username) {
+      setShowNameModal(true);
+      return;
+    }
 
-    socket.emit('join_room', roomId);
+    socket.emit('join_room', { roomId, username });
 
     socket.on('room_data', (data) => {
       setRoomData(data);
@@ -65,6 +110,16 @@ const Room: React.FC = () => {
 
     socket.on('participants_update', (count) => {
       setParticipants(count);
+    });
+
+    socket.on('receive_message', (msg) => {
+      // 如果消息不是自己发的
+      if (msg.senderId !== socket.id) {
+        playNotificationSound();
+        if (!isChatOpen) {
+          setUnreadCount(prev => prev + 1);
+        }
+      }
     });
 
     socket.on('error', (msg) => {
@@ -93,10 +148,18 @@ const Room: React.FC = () => {
       socket.emit('leave_room', roomId);
       socket.off('room_data');
       socket.off('participants_update');
+      socket.off('receive_message'); // Clean up listener
       socket.off('error');
       socket.off('receive_interaction');
     };
-  }, [roomId, navigate]);
+  }, [roomId, navigate, username, isChatOpen]); // Added username and isChatOpen to deps
+
+  // Clear unread count when chat is opened
+  useEffect(() => {
+    if (isChatOpen) {
+      setUnreadCount(0);
+    }
+  }, [isChatOpen]);
 
   const sendInteraction = (content: string) => {
     socket.emit('send_interaction', {
@@ -112,7 +175,44 @@ const Room: React.FC = () => {
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  if (!roomData) {
+  if (!roomData || !roomId) {
+    if (showNameModal) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-slate-900">
+           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700 shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-4">欢迎加入倒计时</h2>
+            <p className="text-slate-400 mb-6">请输入您的昵称以便大家认识您</p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const input = (e.target as any).username.value;
+              if (input.trim()) {
+                localStorage.setItem('username', input);
+                setUsername(input);
+                setShowNameModal(false);
+              }
+            }}>
+              <input
+                name="username"
+                autoFocus
+                defaultValue={localStorage.getItem('username') || ''}
+                type="text"
+                placeholder="您的昵称"
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 mb-4 transition-colors"
+                required
+              />
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors"
+              >
+                加入房间
+              </button>
+            </form>
+          </div>
+        </div>
+        </div>
+      );
+    }
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -131,25 +231,68 @@ const Room: React.FC = () => {
           <span className="font-bold text-lg">{roomData.title}</span>
         </div>
         <div className="flex items-center gap-4">
+           {/* 语音控制 */}
+          <VoiceControl roomId={roomId} />
+
           <div className="flex items-center gap-1 bg-slate-700/50 px-3 py-1 rounded-full text-sm">
             <Users size={16} className="text-green-400" />
-            <span>{participants} 人在线</span>
+            <span>{participants}</span>
           </div>
           <button 
             onClick={copyLink}
             className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded-full text-sm transition-colors"
           >
-            {copySuccess ? '已复制!' : <><Share2 size={16} /> 邀请朋友</>}
+            {copySuccess ? '已复制!' : <><Share2 size={16} /> 邀请</>}
+          </button>
+           <button 
+            onClick={() => setIsChatOpen(!isChatOpen)}
+            className={`relative p-2 rounded-full transition-colors ${isChatOpen ? 'bg-blue-600 text-white' : 'bg-slate-700/50 text-slate-300 hover:bg-slate-600'}`}
+          >
+            <MessageCircle size={20} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-slate-800">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
+      {/* Debug Button */}
+      <button
+        onClick={debugSetAlmostDone}
+        className="fixed bottom-4 left-4 p-2 bg-red-500/20 hover:bg-red-500/40 text-red-300 rounded-full transition-all z-50 opacity-50 hover:opacity-100"
+        title="Debug: 5秒后结束"
+      >
+        <Bug size={16} />
+      </button>
+
+      {/* 聊天面板 */}
+      <ChatPanel roomId={roomId} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+
       {/* 倒计时主体 */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 z-0">
+      <div className={clsx("flex-1 flex flex-col items-center justify-center p-4 z-0 transition-all duration-300", isChatOpen ? "mr-80" : "")}>
         {isExpired ? (
-          <div className="text-center animate-bounce">
-            <h1 className="text-6xl md:text-8xl font-bold text-yellow-400 mb-4">时间到！</h1>
-            <p className="text-2xl text-slate-300">此刻已至。</p>
+          <div className="text-center animate-bounce relative">
+             <div className="absolute -top-32 left-1/2 transform -translate-x-1/2 w-full whitespace-nowrap overflow-hidden">
+                <span className="text-6xl animate-gallop inline-block">🐎</span>
+             </div>
+            <h1 className="text-6xl md:text-8xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-yellow-400 to-red-500 mb-4 animate-pulse">
+              2026 马到成功！
+            </h1>
+            <p className="text-2xl text-yellow-200 font-bold mb-2">金蛇摆尾辞旧岁，骏马奔腾迎新春！</p>
+            <p className="text-xl text-slate-300">祝您新的一年一马当先，万事如意！</p>
+            
+            <style>{`
+              @keyframes gallop {
+                0% { transform: translateX(-100vw) rotate(0deg); }
+                50% { transform: translateX(0) rotate(-10deg); }
+                100% { transform: translateX(100vw) rotate(0deg); }
+              }
+              .animate-gallop {
+                animation: gallop 4s linear infinite;
+              }
+            `}</style>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 w-full max-w-4xl">
@@ -175,7 +318,7 @@ const Room: React.FC = () => {
       </div>
 
       {/* 互动区域 */}
-      <div className="p-8 flex justify-center gap-4 z-10 pb-12">
+      <div className={clsx("p-8 flex justify-center gap-4 z-10 pb-12 transition-all duration-300", isChatOpen ? "mr-80" : "")}>
         <button 
           onClick={() => sendInteraction('❤️')}
           className="p-4 bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/50 rounded-full transition-all transform hover:scale-110 active:scale-95 text-2xl"
